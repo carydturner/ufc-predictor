@@ -1,0 +1,334 @@
+---
+title: 'Project Part One: UFC Fight Predictor'
+author: "Cary Dean Turner and Tony Kim"
+date: "10/21/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE, include=FALSE}
+library(tidyverse)
+master <- read.csv('ufc-master.csv')
+
+
+# Create an indicator set to 1 if red fighter won and 0 otherwise.
+# There were no draws in this data set.
+master$red_win <- ifelse(master$Winner == 'Red', 1, 0)
+names(master)
+
+
+# Create a vector of all variables we want to keep
+cols <- c(
+  'R_odds',
+  'B_odds',
+  'title_bout',
+  'weight_class',
+  'no_of_rounds',
+  'B_current_lose_streak',
+  'B_current_win_streak',
+  'B_draw',
+  'B_longest_win_streak',
+  'B_losses',
+  'B_wins',
+  'B_Stance',
+  'B_total_rounds_fought',
+  'B_total_title_bouts',
+  'B_win_by_KO.TKO',
+  'B_win_by_Submission',
+  'B_Weight_lbs',
+  'B_avg_SIG_STR_landed',
+  'B_avg_SIG_STR_pct',
+  'B_avg_SUB_ATT',
+  'B_avg_TD_landed',
+  'B_avg_TD_pct',
+  'B_Height_cms',
+  'B_Reach_cms',
+  'B_age',
+  'R_current_lose_streak',
+  'R_current_win_streak',
+  'R_draw',
+  'R_longest_win_streak',
+  'R_losses',
+  'R_wins',
+  'R_Stance',
+  'R_total_rounds_fought',
+  'R_total_title_bouts',
+  'R_win_by_KO.TKO',
+  'R_win_by_Submission',
+  'R_Weight_lbs',
+  'R_avg_SIG_STR_landed',
+  'R_avg_SIG_STR_pct',
+  'R_avg_SUB_ATT',
+  'R_avg_TD_landed',
+  'R_avg_TD_pct',
+  'R_Height_cms',
+  'R_Reach_cms',
+  'R_age',
+  'better_rank',
+  'finish_round',
+  'total_fight_time_secs',
+  'red_win'
+)
+
+
+
+# Update data frame to include only relevant variables
+fights <- master[,cols]
+
+# for (var in names(fights)) {
+#   print(var)
+#   print(sum(is.na(fights[,var])))
+#   print("")
+# }
+
+# Get rid of NA values
+fights <- na.omit(fights)
+
+
+# Subtract Blue height, weight, reach, and age from Red's
+# to get Red's height, weight, reach, and age advantage
+fights$height_adv <- fights$R_Height_cms - fights$B_Height_cms
+fights$weight_adv <- fights$R_Weight_lbs - fights$B_Weight_lbs
+fights$reach_adv <- fights$R_Reach_cms - fights$B_Reach_cms
+fights$age_adv <- fights$R_age - fights$B_age
+
+# Do same for avg strikes, and takedowns landed/percentage, and for submission attempts
+fights$str_landed_adv <- fights$R_avg_SIG_STR_landed - fights$B_avg_SIG_STR_landed
+fights$str_pct_adv <- fights$R_avg_SIG_STR_pct - fights$B_avg_SIG_STR_pct
+fights$TD_landed_adv <- fights$R_avg_TD_landed - fights$B_avg_TD_landed
+fights$TD_pct_adv <- fights$R_avg_TD_pct - fights$B_avg_TD_pct
+fights$sub_att_adv <- fights$R_avg_SUB_ATT - fights$B_avg_SUB_ATT
+
+fights$lose_streak_dif <- fights$R_current_lose_streak - fights$B_current_lose_streak
+fights$win_streak_dif <- fights$R_current_win_streak - fights$B_current_win_streak
+fights$longest_win_streak_dif <- fights$R_longest_win_streak - fights$B_longest_win_streak
+fights$draws_dif <- fights$R_draw - fights$B_draw
+fights$losses_dif <- fights$R_losses - fights$B_losses
+fights$wins_dif <- fights$R_wins - fights$B_wins
+fights$total_rounds_dif <- fights$R_total_rounds_fought - fights$B_total_rounds_fought
+fights$title_bouts_dif <- fights$R_total_title_bouts - fights$B_total_title_bouts
+
+# Determine number of wins by KO/TKO or submission for each fighter
+fights$R_wins_by_KO_sub <- fights$R_win_by_KO.TKO + fights$R_win_by_Submission
+fights$B_wins_by_KO_sub <- fights$B_win_by_KO.TKO + fights$B_win_by_Submission
+
+# Determine number of wins by decision for each fighter.
+# Wins by decision = wins - wins by KO/TKO or submission
+fights$R_wins_by_dec <- fights$R_wins - fights$R_wins_by_KO_sub
+fights$B_wins_by_dec <- fights$B_wins - fights$B_wins_by_KO_sub
+
+# Get rid of nonsensical negative values
+fights <- fights %>%
+  filter(R_wins_by_dec >= 0, B_wins_by_dec >= 0)
+
+# Calculate the ratio of wins by KO/TKO and submission (finishes) to wins by decision.
+# We add one to each to avoid zero division.
+fights$R_finish_dec_ratio <- (fights$R_wins_by_KO_sub + 1) / (fights$R_wins_by_dec + 1)
+fights$B_finish_dec_ratio <- (fights$B_wins_by_KO_sub + 1) / (fights$B_wins_by_dec + 1)
+
+# Calculate overall win loss ratio for each fighter. Add one again to avoid zero division.
+fights$R_wl_ratio <- (fights$R_wins + 1) / (fights$R_losses + 1)
+fights$B_wl_ratio <- (fights$R_wins + 1) / (fights$B_losses + 1)
+
+# Difference between number of KO/submission finishes
+fights$KO_sub_wins_dif <- fights$R_wins_by_KO_sub - fights$B_wins_by_KO_sub
+
+# Finish ratio difference between fighters
+fights$finish_ratio_adv <- fights$R_finish_dec_ratio - fights$B_finish_dec_ratio
+
+# Win-loss ratio difference between fighters
+fights$wl_ratio_adv <- fights$R_wl_ratio - fights$B_wl_ratio
+
+# Create variables for different stances of the fighters
+fights$R_switch <- ifelse(fights$R_Stance == 'Switch', 1, 0)
+fights$B_switch <- ifelse(fights$B_Stance == 'Switch', 1, 0)
+
+# Create indicator for each fighter's relative ranking
+fights$R_better_rank <- ifelse(fights$better_rank == 'Red', 1, 0)
+fights$B_better_rank <- ifelse(fights$better_rank == 'Blue',  1, 0)
+
+
+
+# Create vector with names of all variables we are keeping for analysis
+keep <- c(
+          'R_odds',
+          'red_win',
+          'title_bout',
+          'weight_class',
+          #'no_of_rounds',
+          #'total_fight_time_secs',
+          'height_adv',
+          'weight_adv',
+          'age_adv',
+          'reach_adv',
+          'str_landed_adv',
+          'str_pct_adv',
+          'TD_landed_adv',
+          'TD_pct_adv',
+          'lose_streak_dif',
+          'win_streak_dif',
+          'longest_win_streak_dif',
+          'draws_dif',
+          'losses_dif',
+          'wins_dif',
+          'total_rounds_dif',
+          'title_bouts_dif',
+          'KO_sub_wins_dif',
+          'finish_ratio_adv',
+          'wl_ratio_adv',
+          'R_better_rank',
+          'B_better_rank',
+          'R_switch',
+          'B_switch'
+          )
+
+# Split into train and test sets, using 80/20 split
+set.seed(138)
+in.test <- sample(nrow(fights), nrow(fights)/5)
+
+# Sanity check
+length(in.test)
+dim(fights)[1]*0.2
+
+# Assign train and test sets
+test <- fights[in.test,keep]
+train <- fights[-in.test,keep]
+
+
+
+```
+
+## Part One: The Data  
+  
+  The dataset we are working with came from Kaggle.com and contains information on ~4400 UFC mixed martial arts fights. The data was originally scraped directly from ufcstats.com, leading us to believe that it is likely very reliable, professionally collected data.  
+  
+  In the dataset, each observation is one UFC fight between two fighters. By convention, in UFC fights, one fighter is designated "Red" and the other "Blue", and are identified as such by the color of their gloves. In each observation we have several statistics for each of the two fighters, such as their reach, height, weight, age, career average successful striking percentage, career average takedown attempts and percentage, total wins, total losses, total number of draws, total rounds fought in their career, the Las Vegas gambling odds for each fighter, the outcome of the match, and more.  
+  
+  Our choice of binary variable to predict was obvious: the outcome of the match. In the dataset there are only two possible outcomes: either the Red fighter wins or the Blue fighter wins (there are no draws in the dataset). Instead of using Blue or Red as the outcome, we created an indicator variable `red_win` that is set to 1 if the Red fighter won and 0 if the Blue fighter won. This choice was somewhat arbitrary, although by convention, the favored fighter is Red, so it made sense to us to make our outcome variable in terms of Red.  
+  
+  Our continuous variable of interest was somewhat of a less obvious choice, however. There are several continuous variables in the dataset (almost every statistic for each fighter is continuous), but ultimately the one which seemed the most interesting to us is the Las Vegas gambling odds assigned to the Red fighter. 
+  
+  The UFC (and MMA more broadly) is a notoriously difficult sport to predict. Not only is it an incredibly young professional sport, but just by its very nature is chaotic and unconventional. Put two world class fighters in a cage with nothing but 4oz gloves to protect themselves and anything can happen. If we are able to come up with some reliable results, we may very well be the first people to create an accurate predictor of mixed martial arts bouts. Additionally, if we are able to accurately predict odds of a win, we could potentially identify when the gambling odds over- or under-favor a particular.  
+  
+  
+## Part Two: Cleaning  
+  
+  The original dataset is quite robust, containing 127 variables. However, many of these variables are missing for nearly all fights. For this reason, we had to pare down our covariates significantly. We also removed several variable which are recorded *during* the match, such as successful takedown attempts or significant strikes in the match. The reason for removing these variables is that we wanted to make a predictive algorithm that is *useful*. If our outcome predictor relies on using statistics that are collected within the match we are trying to predict the outcome of, then that means we can only predict the outcome after the match has already happened! This is obviously a useless predictor, and would not be of much interest to anybody. Other variables were removed simply because they were superfluous, and seemed completely irrelevant. Some of these variables included the date and location of the fight, as well as the gender and weight class (since any particular fight will be within one weight class and between two fighters of the same gender).  
+  
+  
+## Part Three: Transformations and Exploration  
+  
+  Perhaps the most significant transformation of variables that we made was to take every statistic of each fighter and combine it into a single statistic capturing the difference between the fighters. For example, instead of looking at the height of the Red fighter and the height of the Blue fighter *separately*, we combine them into one variable by subtracting Blue fighter's height from the Red fighter's heigh and call it `R_height_adv` (Red height advantage). We repeated this process for every statistic, always using the same form: $Red_stat - Blue_stat$, so that everything is in terms of the Red fighter.  
+  
+  We also added additional variables such as the win-loss ratio for each fighter, calculated as $\frac{wins + 1}{losses + 1}$ (adding 1 to the number of losses to ensure we're not dividing by zero, and adding 1 to the number of wins to even it out). We also calculated for each fighter the proportion of their wins that were by KO or submission, as opposed to wins by judge's decision, and created ratios similar to the win-loss ratio above.
+  
+  We stayed away from doing log transformations due to the fact that, because nearly all our predictors are in the form of $Red - Blue$, we have many negative and zero values. Note: We did first try logging the original variables (i.e., Red and Blue separately), and the logged versions had almost no association with either of our outcome variables, so we decided to nix the idea. We considered squaring our predictors and looking for associations with the outcome, but it didn't ultimately make much sense because so many of our variables have negative values which we want to stay negative. We instead decided to cube all our predictors, but alas, none of the cubic versions of the predictors have very strong associations with either of our outcomes. Ultimately, we decided to use the cubic terms, as well as two-way interactive terms, as additional predictors in our models, allowing the regularization methods to pick out the most important ones.     
+  
+  Through our analysis, we found that age difference, current win streak difference, win-loss ratio difference, and career losses difference to be the predictors most strongly correlated with our continuous outcome variable `R_odds`. We didn't find many strong associations with our binary outcome variable `red_win`, but the strongest are age difference, successful takedown difference, current win streak difference, and career losses difference.  
+  
+```{r, echo=FALSE}
+# Indices of non-numeric variables
+non_numeric <- c(3,4)
+
+# cube predictors (would square them but we want negatives to stay negative)
+# cubed.vars <- train[,-c(1, 2, 3, 4)]^3
+# cubed.vars$red_win <- train$red_win
+# cubed.vars$R_odds <- train$R_odds
+
+# Check for correlation between variables and outputs
+library(corrplot)
+C <- cor(train[,-non_numeric])
+corrplot(C, method = 'circle')
+```
+  
+  
+  
+```{r, echo=FALSE}
+# Check for correlation between cubic vars and outputs
+#C.cubic <- cor(cubed.vars)
+#corrplot(C.cubic, method = 'circle')
+
+colors <- c('1' = 'red', '0' = 'blue')
+
+ggplot(train) +
+  geom_density(aes(x = age_adv, color = as.factor(red_win))) +
+  scale_color_manual(values = colors) +
+  labs(x = 'Age Advantage of Red', color = 'red_win', title = 'Density Plot of Age Advantage for Red') +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(train, aes(x = age_adv, y = R_odds)) + 
+  geom_point() +
+  geom_smooth(method = 'lm', color = 'blue') +
+  labs(x = 'Red Age Advantage', y = 'R_odds', title = 'Red Age Advantage Vs. Red Odds') +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(train, aes(x = losses_dif, y = R_odds)) + 
+  geom_point() +
+  geom_smooth(method = 'lm', color = 'blue') +
+  labs(x = 'Difference in Losses', y = 'R_odds', title = 'Career Losses Difference Vs. Red Odds') +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+## Part Four: Predictions  
+  
+  
+
+### Classification Model  
+  
+  Since we are predicting the outcome of a fight (win or loss), there isn't any particular reason to treat Type I errors and type II errors differently. In other words, predicting a loss as a win isn't any worse than predicting a win as a loss. For this reason, maximizing classification accuracy seems to be the most reasonable objective function.  
+  
+  To determine a baseline prediction error to advance from, we simply calculated the percentage of matches which resulted in a win for the Red fighter, since any classifier could perform at least that well by predicting a win for Red every time. We found this baseline value to be 0.5753589. From this benchmark, we can say that any classifier which has a test accuracy greater than 58% is at least somewhat useful, but ideally we would like to shoot for test accuracy of 60% or greater. Of course, anything better than this would be amazing, but given the fact that MMA fights are notoriously unpredictable, I don't think it's likely we will achieve a very high accuracy.  
+  
+  In training our model, we opted to go with the "kitchen sink" method. i.e., throw in all our variables, transformed variables, and two way interactions, and let the regularization process suss out which variables are the most important. As for the type of regularization used, we trained both lasso and ridge models using 100 different values of lambda, and picked the value of lambda for each which maximized estimated AUC, where the AUC was estimated using 10-fold cross validation. After performing the cross-validation, we had two classification models: a ridge model and a lasso model. The lasso model slightly out-performed the ridge model, with a CV AUC of 0.70, versus 0.65 for the ridge model. Based on these cross-validation metrics, we are estimating that our model will have an AUC of ~0.70 when computed on our test set.  
+  
+  One interesting thing to note is that, when evaluating the models on the full training set, the ridge model actually outperformed the lasso model by almost every metric, even though the lasso performed better in cross-validation. Our theory to explain this is that because the ridge doesn't zero out any coefficients, it likely has higher variance and could perhaps be overfitting to the training data. However, because the lasso model zeroed out nearly all of the ~600 predictors, it almost certainly has much lower variance, although almost certainly higher bias. In this case, it seems like the additional bias added by lasso was outweighed by the reduction in variance.  
+  
+```{r, include=FALSE}
+
+```
+  
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

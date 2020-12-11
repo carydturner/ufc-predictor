@@ -1,0 +1,836 @@
+---
+title: 'Project Part Two: UFC Fight Predictor'
+author: "Cary Dean Turner and Tony Kim"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#knitr::include_graphics()
+
+
+library(tidyverse)
+
+master <- read.csv('ufc-master.csv')
+
+
+# Create an indicator set to 1 if red fighter won and 0 otherwise.
+# There were no draws in this data set.
+master$red_win <- ifelse(master$Winner == 'Red', 1, 0)
+names(master)
+
+
+# Create a vector of all variables we want to keep
+cols <- c(
+  'R_odds',
+  'B_odds',
+  'title_bout',
+  'weight_class',
+  'no_of_rounds',
+  'B_current_lose_streak',
+  'B_current_win_streak',
+  'B_draw',
+  'B_longest_win_streak',
+  'B_losses',
+  'B_wins',
+  'B_Stance',
+  'B_total_rounds_fought',
+  'B_total_title_bouts',
+  'B_win_by_KO.TKO',
+  'B_win_by_Submission',
+  'B_Weight_lbs',
+  'B_avg_SIG_STR_landed',
+  'B_avg_SIG_STR_pct',
+  'B_avg_SUB_ATT',
+  'B_avg_TD_landed',
+  'B_avg_TD_pct',
+  'B_Height_cms',
+  'B_Reach_cms',
+  'B_age',
+  'R_current_lose_streak',
+  'R_current_win_streak',
+  'R_draw',
+  'R_longest_win_streak',
+  'R_losses',
+  'R_wins',
+  'R_Stance',
+  'R_total_rounds_fought',
+  'R_total_title_bouts',
+  'R_win_by_KO.TKO',
+  'R_win_by_Submission',
+  'R_Weight_lbs',
+  'R_avg_SIG_STR_landed',
+  'R_avg_SIG_STR_pct',
+  'R_avg_SUB_ATT',
+  'R_avg_TD_landed',
+  'R_avg_TD_pct',
+  'R_Height_cms',
+  'R_Reach_cms',
+  'R_age',
+  'better_rank',
+  'finish_round',
+  'total_fight_time_secs',
+  'red_win'
+)
+
+
+
+# Update data frame to include only relevant variables
+fights <- master[,cols]
+
+# Get rid of NA values
+fights <- na.omit(fights)
+
+
+# Subtract Blue height, weight, reach, and age from Red's
+# to get Red's height, weight, reach, and age advantage
+fights$height_adv <- fights$R_Height_cms - fights$B_Height_cms
+fights$weight_adv <- fights$R_Weight_lbs - fights$B_Weight_lbs
+fights$reach_adv <- fights$R_Reach_cms - fights$B_Reach_cms
+fights$age_adv <- fights$R_age - fights$B_age
+
+# Do same for avg strikes, and takedowns landed/percentage, and for submission attempts
+fights$str_landed_adv <- fights$R_avg_SIG_STR_landed - fights$B_avg_SIG_STR_landed
+fights$str_pct_adv <- fights$R_avg_SIG_STR_pct - fights$B_avg_SIG_STR_pct
+fights$TD_landed_adv <- fights$R_avg_TD_landed - fights$B_avg_TD_landed
+fights$TD_pct_adv <- fights$R_avg_TD_pct - fights$B_avg_TD_pct
+fights$sub_att_adv <- fights$R_avg_SUB_ATT - fights$B_avg_SUB_ATT
+
+fights$lose_streak_dif <- fights$R_current_lose_streak - fights$B_current_lose_streak
+fights$win_streak_dif <- fights$R_current_win_streak - fights$B_current_win_streak
+fights$longest_win_streak_dif <- fights$R_longest_win_streak - fights$B_longest_win_streak
+fights$draws_dif <- fights$R_draw - fights$B_draw
+fights$losses_dif <- fights$R_losses - fights$B_losses
+fights$wins_dif <- fights$R_wins - fights$B_wins
+fights$total_rounds_dif <- fights$R_total_rounds_fought - fights$B_total_rounds_fought
+fights$title_bouts_dif <- fights$R_total_title_bouts - fights$B_total_title_bouts
+
+# Determine number of wins by KO/TKO or submission for each fighter
+fights$R_wins_by_KO_sub <- fights$R_win_by_KO.TKO + fights$R_win_by_Submission
+fights$B_wins_by_KO_sub <- fights$B_win_by_KO.TKO + fights$B_win_by_Submission
+
+# Determine number of wins by decision for each fighter.
+# Wins by decision = wins - wins by KO/TKO or submission
+fights$R_wins_by_dec <- fights$R_wins - fights$R_wins_by_KO_sub
+fights$B_wins_by_dec <- fights$B_wins - fights$B_wins_by_KO_sub
+
+# Get rid of nonsensical negative values
+fights <- fights %>%
+  filter(R_wins_by_dec >= 0, B_wins_by_dec >= 0)
+
+# Calculate the ratio of wins by KO/TKO and submission (finishes) to wins by decision.
+# We add one to each to avoid zero division.
+fights$R_finish_dec_ratio <- (fights$R_wins_by_KO_sub + 1) / (fights$R_wins_by_dec + 1)
+fights$B_finish_dec_ratio <- (fights$B_wins_by_KO_sub + 1) / (fights$B_wins_by_dec + 1)
+
+# Calculate overall win loss ratio for each fighter. Add one again to avoid zero division.
+fights$R_wl_ratio <- (fights$R_wins + 1) / (fights$R_losses + 1)
+fights$B_wl_ratio <- (fights$R_wins + 1) / (fights$B_losses + 1)
+
+# Difference between number of KO/submission finishes
+fights$KO_sub_wins_dif <- fights$R_wins_by_KO_sub - fights$B_wins_by_KO_sub
+
+# Finish ratio difference between fighters
+fights$finish_ratio_adv <- fights$R_finish_dec_ratio - fights$B_finish_dec_ratio
+
+# Win-loss ratio difference between fighters
+fights$wl_ratio_adv <- fights$R_wl_ratio - fights$B_wl_ratio
+
+# Create variables for different stances of the fighters
+fights$R_switch <- ifelse(fights$R_Stance == 'Switch', 1, 0)
+fights$B_switch <- ifelse(fights$B_Stance == 'Switch', 1, 0)
+
+# Create indicator for each fighter's relative ranking
+fights$R_better_rank <- ifelse(fights$better_rank == 'Red', 1, 0)
+fights$B_better_rank <- ifelse(fights$better_rank == 'Blue',  1, 0)
+
+
+
+# Create vector with names of all variables we are keeping for analysis
+keep <- c(
+  'R_odds',
+  'red_win',
+  'title_bout',
+  'weight_class',
+  'height_adv',
+  'weight_adv',
+  'age_adv',
+  'reach_adv',
+  'str_landed_adv',
+  'str_pct_adv',
+  'TD_landed_adv',
+  'TD_pct_adv',
+  'lose_streak_dif',
+  'win_streak_dif',
+  'longest_win_streak_dif',
+  'draws_dif',
+  'losses_dif',
+  'wins_dif',
+  'total_rounds_dif',
+  'title_bouts_dif',
+  'KO_sub_wins_dif',
+  'finish_ratio_adv',
+  'wl_ratio_adv',
+  'R_better_rank',
+  'B_better_rank',
+  'R_switch',
+  'B_switch'
+)
+
+
+############### Split Data Into Test and Train Sets ###################
+
+# Split into train and test sets, using 80/20 split
+set.seed(138)
+in.test <- sample(nrow(fights), nrow(fights)/5)
+
+# Sanity check
+length(in.test)
+dim(fights)[1]*0.2
+
+# Assign train and test sets
+test <- fights[in.test,keep]
+train <- fights[-in.test,keep]
+
+
+
+# Indices of non-numeric variables
+non_numeric <- c(3,4)
+
+# cube predictors (would square them but we want negatives to stay negative)
+cubed.vars <- train[,-c(2, 3, 4, 24, 25, 26, 27)]^3
+cubed.vars$red_win <- train$red_win
+
+############## Building Predictive Models ################
+
+library(ROCR)
+library(glmnet)
+library(cvTools)
+library(boot)
+
+# Function to compute the AUC of a binary classifier
+compute_auc <- function(p, labels) {
+  pred <- prediction(p, labels)
+  auc <- performance(pred, 'auc')
+  auc <- unlist(slot(auc, 'y.values'))
+  auc
+}
+
+# Function to plot the ROC curve of a binary classifier
+plot_roc <- function(p, labels, model_name) {
+  pred <- prediction(p, labels)
+  perf <- performance(pred,"tpr","fpr")
+  plot(perf, col="black", main = paste(model_name))
+}
+
+
+# Remove binary outcome variable (red_win) from cubed.vars data frame
+cubed.vars <- cubed.vars[,-21]
+
+# Change names of all columns to reflect that they are cubed.
+cubed.cols <- rep('', dim(cubed.vars)[2])
+for (i in 1:length(names(cubed.vars))) {
+  cubed.cols[i] <- paste(names(cubed.vars)[i], '^3', sep='')
+}
+
+
+# Create model matrix with all cubed terms and all two way interactions
+form <- red_win ~ . + .^2
+x <- model.matrix(form, data=train)
+
+# Use column bind to add all cubed variables and our outcome variable (red_win)
+x <- cbind(train$red_win, x, cubed.vars)
+x <- x[,-2]
+colnames(x)[colnames(x) == 'train$red_win'] <- 'red_win'
+
+# Recast it as a model matrix
+x.train <- model.matrix(red_win ~ ., x)
+
+# Create vector of our outcome variable
+y.train <- train$red_win
+
+
+### Ridge Regression
+ridge.lr <- cv.glmnet(x.train, y.train, type.measure='auc', alpha=0, 
+                      family='binomial', standardize=TRUE, seed=1)
+#plot(ridge.lr$lambda, ridge.lr$cvm, xlab='Lambda', ylab='AUC', main='Ridge')
+ridge.lambda <- ridge.lr$lambda.min
+ridge.auc <- max(ridge.lr$cvm)
+
+# Make predictions on full training set (using lambda that maximizes AUC)
+ridge.lr.pred <- predict(ridge.lr, s=ridge.lr$lambda.min, newx=x.train, type='response')
+
+# Plot ROC curve for model using AUC-maximizing lambda
+#plot_roc(ridge.lr.pred, train$red_win, paste('Ridge (Lambda = ',ridge.lr$lambda.min,')', sep=''))
+ridge.train.auc <- compute_auc(ridge.lr.pred, train$red_win)
+ridge.train.auc
+
+# Transform probabilities into actual predicted outcomes, using 0.55 as our threshold
+ridge.lr.pred <- ifelse(ridge.lr.pred > 0.55, 1, 0)
+
+# Create confusion matrix
+ridge.conf <- table(ridge.lr.pred, train$red_win)
+ridge.conf
+
+# Calculate classification metrics
+TP <- ridge.conf[2,2]
+TN <- ridge.conf[1,1]
+FP <- ridge.conf[2,1]
+FN <- ridge.conf[1,2]
+n <- TP + TN + FP + FN
+accuracy <- (TP + TN) / n
+zo.loss <- (FP + FN) / n
+TPR <- TP / (FN + TP)
+FPR <- FP / (TN + FP)
+TNR <- TN / (TN + FP)
+FNR <- FN / (FN + TP)
+precision <- TP / (TP + FP)
+false.discovery <- FP / (TP + FP)
+
+Ridge <- c(accuracy, zo.loss, TPR, TNR, precision, FPR, FNR, false.discovery, ridge.auc, NA)
+
+
+
+### Lasso
+lasso.lr <- cv.glmnet(x.train, y.train, type.measure='auc', alpha=1, 
+                      family='binomial', standardize=TRUE, seed=1)
+plot(lasso.lr$lambda, lasso.lr$cvm, xlab='Lambda', ylab='AUC', main='Lasso')
+lasso.lambda <- lasso.lr$lambda.min
+lasso.auc <- max(lasso.lr$cvm)
+
+# Make predictions on full training set (using AUC-maximizing lambda)
+lasso.lr.pred <- predict(lasso.lr, s=lasso.lr$lambda.min, newx=x.train, type='response')
+
+# Plot ROC curve for Lasso model using AUC-maximizing lambda
+plot_roc(lasso.lr.pred, train$red_win, paste('Lasso (Lambda = ',lasso.lr$lambda.min,')', sep=''))
+lasso.train.auc <- compute_auc(lasso.lr.pred, train$red_win)
+lasso.train.auc
+
+# Transform probabilities into actual predicted outcomes, using 0.55 as our threshold
+lasso.lr.pred <- ifelse(lasso.lr.pred > 0.55, 1, 0)
+
+# Create confusion matrix
+lasso.conf <- table(lasso.lr.pred, train$red_win)
+lasso.conf
+
+# Compute classification metrics
+TP <- lasso.conf[2,2]
+TN <- lasso.conf[1,1]
+FP <- lasso.conf[2,1]
+FN <- lasso.conf[1,2]
+n <- TP + TN + FP + FN
+accuracy <- (TP + TN) / n
+zo.loss <- (FP + FN) / n
+TPR <- TP / (FN + TP)
+FPR <- FP / (TN + FP)
+TNR <- TN / (TN + FP)
+FNR <- FN / (FN + TP)
+precision <- TP / (TP + FP)
+false.discovery <- FP / (TP + FP)
+
+Lasso <- c(accuracy, zo.loss, TPR, TNR, precision, FPR, FNR, false.discovery, lasso.auc, NA)
+Metric <- c('Accuracy', '0-1 Loss', 'Sensitivity', 'Specificity', 'Precision',
+            'Type I Error Rate', 'Type II Error Rate', 'False Discovery Rate', 'CV AUC', 'Test AUC')
+
+# Create data frame containing all metrics for both models
+model.metrics.train <- tibble(Metric, Lasso, Ridge)
+model.metrics.train
+
+
+
+
+
+
+
+
+```
+
+
+## Part One: Prediction on the Test Set  
+  
+### Classification
+  
+  In predicting the fight outcome on our test data set, our results were fairly consistent with our estimates from cross-validation. Our cross-validated estimate of AUC was 0.706, while on the test data our chosen model achieved an AUC of 0.663—slightly under our estimate. As can be seen in the table below, they also had somewhat similar values for Accuracy, Precision, and False Discovery Rate. The most notable differences in performance are in sensitivity, where the model performed better on the training data, and specificity, where the model actually performed notably better on the test data. The Type 1 error rate was also lower on our test data, which is somewhat surprising. 
+  
+```{r, fig.width=3, fig.height=3, fig.align='center', echo=FALSE}
+######### Predict for test ############
+test.cubed.vars <- test[,-c(2, 3, 4, 24, 25, 26, 27)]^3
+test.cubed.vars$red_win <- test$red_win
+
+# Remove binary outcome variable (red_win) from cubed.vars data frame
+test.cubed.vars <- test.cubed.vars[,-21]
+
+# Change names of all columns to reflect that they are cubed.
+test.cubed.cols <- rep('', dim(test.cubed.vars)[2])
+for (i in 1:length(names(test.cubed.vars))) {
+  test.cubed.cols[i] <- paste(names(test.cubed.vars)[i], '^3', sep='')
+}
+
+
+# Create model matrix with all cubed terms and all two way interactions
+test.form <- red_win ~ . + .^2
+x.test <- model.matrix(test.form, data=test)
+
+# Use column bind to add all cubed variables and our outcome variable (red_win)
+x.test <- cbind(test$red_win, x.test, test.cubed.vars)
+x.test <- x.test[,-2]
+colnames(x.test)[colnames(x.test) == 'test$red_win'] <- 'red_win'
+
+# Recast it as a model matrix
+x.test <- model.matrix(red_win ~ ., x.test)
+
+# Create vector of our outcome variable
+y.test <- test$red_win
+
+ridge.lr.prob.test <- predict(ridge.lr, s=ridge.lr$lambda.min, 
+                              newx=x.test, type='response')
+
+#plot_roc(ridge.lr.prob.test, test$red_win, paste('Ridge (Lambda = ',ridge.lr$lambda.min,')', sep=''))
+ridge.test.auc <- compute_auc(ridge.lr.prob.test, test$red_win)
+
+
+# Transform probabilities into actual predicted outcomes, using 0.55 as our threshold
+ridge.lr.pred.test <- ifelse(ridge.lr.prob.test > 0.55, 1, 0)
+
+ridge.conf <- table(ridge.lr.pred.test, test$red_win)
+
+
+# Calculate classification metrics
+TP <- ridge.conf[2,2]
+TN <- ridge.conf[1,1]
+FP <- ridge.conf[2,1]
+FN <- ridge.conf[1,2]
+n <- TP + TN + FP + FN
+accuracy <- (TP + TN) / n
+zo.loss <- (FP + FN) / n
+TPR <- TP / (FN + TP)
+FPR <- FP / (TN + FP)
+TNR <- TN / (TN + FP)
+FNR <- FN / (FN + TP)
+precision <- TP / (TP + FP)
+false.discovery <- FP / (TP + FP)
+
+Ridge <- c(accuracy, zo.loss, TPR, TNR, precision, FPR, FNR, false.discovery, NA, ridge.test.auc)
+TestMetric <- c('Accuracy', '0-1 Loss', 'Sensitivity', 'Specificity', 'Precision',
+            'Type I Error Rate', 'Type II Error Rate', 'False Discovery Rate', 'CV AUC','Test AUC')
+model.metrics.test.ridge <- tibble(TestMetric, Ridge)
+
+
+lasso.lr.prob.test <- predict(lasso.lr, s=lasso.lr$lambda.min, 
+                              newx=x.test, type='response')
+
+plot_roc(lasso.lr.prob.test, test$red_win, paste('Lasso ROC'))
+lasso.test.auc <- compute_auc(lasso.lr.prob.test, test$red_win)
+
+
+# Transform probabilities into actual predicted outcomes, using 0.58 as our threshold
+lasso.lr.pred.test <- ifelse(lasso.lr.prob.test > 0.58, 1, 0)
+
+lasso.conf <- table(lasso.lr.pred.test, test$red_win)
+
+
+```
+  
+#### Lasso Confusion Matrix 
+  
+```{r, echo=FALSE}
+lasso.conf
+
+# Calculate classification metrics
+TP <- lasso.conf[2,2]
+TN <- lasso.conf[1,1]
+FP <- lasso.conf[2,1]
+FN <- lasso.conf[1,2]
+n <- TP + TN + FP + FN
+accuracy <- (TP + TN) / n
+zo.loss <- (FP + FN) / n
+TPR <- TP / (FN + TP)
+FPR <- FP / (TN + FP)
+TNR <- TN / (TN + FP)
+FNR <- FN / (FN + TP)
+precision <- TP / (TP + FP)
+false.discovery <- FP / (TP + FP)
+
+Lasso <- c(accuracy, zo.loss, TPR, TNR, precision, FPR, FNR, false.discovery, NA, lasso.test.auc)
+model.metrics.test <- tibble(TestMetric, Lasso, Ridge)
+
+
+# Compare Lasso results on training data vs. test data
+train.test.metrics <- data.frame(TestMetric, model.metrics.train[,2], model.metrics.test[,2])
+colnames(train.test.metrics) <- c('Metric', 'Train', 'Test')
+```
+  
+  
+#### Lasso Prediction Metrics on Training and Test Data
+```{r, echo=FALSE}
+train.test.metrics
+```
+
+
+### Regression  
+  
+In predicting the red fighter's odds on our test data set, the results are again fairly consistent with our estimates from cross validation. The best model from cross validation was a lasso model that used transforms and interaction terms, and its cross validation error was 226.448. Our estimate for the test error from Part 1 was 229, as a conservative estimate that the test error would be slightly higher than the cross-validation error. The test error actually turned out to be lower than the cross-validation error, with its value as 225.247. This is very reasonable because our analysis in Part 1 also mentioned that because our number of cross-validation folds k=10 is a relatively small number, the cross validation could certainly overestimate the test error; the use of less data in each fold may have introduced more bias. All in all, the estimate was very close to the real test error.
+
+As seen in the Appendix, we have also attached plots of residuals against fitted values and residuals against covariates such as height and weight advantage. All 3 plots show a relative lack of correlation between residuals and fitted values / covariates, indicating that the linear model is a good estimate of the underlying population model.
+
+
+
+## Part Two: Inference  
+
+For our analysis, we choose the logistic regression model that predicts whether the Red fighter wins. We perform our analysis by fitting a generic logistic regression on the reduced set of covariates given by our lasso model in Part 1, which in our case is two variables: (1) R_odds [the odds of the Red fighter] and (2) age_adv [the age difference between the two fighters]. As we can observe in the table below, both coefficients are statistically significant, with each of their p-values being less than 1e-05. This means that given that the null hypotheses that each coefficient is 0 are true, the probability of observing coefficients as extreme as each of our fitted model's coefficients is less than 1e-05 (hence very unlikely). Note that this does not equate to practical significance, since the relationship between these 2 covariates and the outcome can be weak. We cautiously believe these results, since it would make sense that pre-match odds and age difference in fighters have nonzero effects on the match's outcome. At the same time, we are aware of possible biases such as post-selection inference that downgrade the quality of these results, as we will detail below.
+
+
+#### Coefficients on Training Data
+```{r, echo=FALSE}
+# Fitting a logistic regression model using the subset of variables selected by the lasso
+train.model <- glm(red_win ~ R_odds + age_adv, data=train, family='binomial')
+summary(train.model)$coef # Both appear to be very statistically significant
+
+```
+  
+  
+After fitting our chosen model and performing inference on the training data, we then re-fit the same model (logistic regression using R_odds and age_adv) onto the held out test data. The results were noticeably different. As noted above, when the model was fit on the training data, we saw that both covariates (R_odds and age_adv) were statistically significant at the 0.001% level, but when the model is fit on the test data we see that, although R_odds remains statistically significant at the 0.001% level, age_adv no longer appears to be significant, with a p-value of 0.345. This could be due to the fact that when looking at the results from the training data, our results are subject to post-selection inference. This is because when we are performing inference on the training set, we are using the model which was chosen by lasso on that same training set, so our results are biased and overly optimistic in favor of those covariates that the lasso selected. However, it’s also worth noting that, because our training data set is so much larger than the test data set, it’s likely a better representation of the true underlying population; the inference results on our test set, although unbiased, may have higher variance.
+
+#### Coefficients on Test Data
+```{r, echo=FALSE}
+# Let's refit on the test data to compare
+test.model <- glm(red_win ~ R_odds + age_adv, data=test, family='binomial')
+summary(test.model)$coef
+
+```
+
+
+### Confidence Intervals  
+  
+In performing the bootstrap to obtain confidence intervals, our results were almost identical, which can be seen in the tables below. We chose to use the normal distribution interval in this case because all of our coefficient estimates have distributions that were very close to normal. We then performed the bootstrap to compute intervals on the test data (see Appendix) and similarly got confidence intervals that were shockingly close to the ones computed by glm(). One additional thing to note is that our confidence intervals computed on the test data were almost exactly twice as large as the confidence intervals computed on the training data, which is consistent with the fact that the training data set is four times as large as the test data, and the fact that standard errors are proportional to 1/sqrt(n).
+  
+#### Normal Confidence Intervals from glm()
+```{r, echo=FALSE}
+
+# Construct 95% normal confidence intervals
+
+summ <- summary(train.model)
+# summ$coef
+low.norm <- summ$coef[,1] - 1.96*summ$coef[,2]
+high.norm <- summ$coef[,1] + 1.96*summ$coef[,2]
+CI.norm <- data.frame(low.norm, high.norm)
+colnames(CI.norm) <- c('Low', 'High')
+# CI.norm
+CI.norm$Size <- CI.norm$High - CI.norm$Low
+CI.norm
+```
+
+#### Normal Confidence Intervals via the Bootstrap  
+
+```{r, echo=FALSE}
+# Bootstrap for confidence intervals
+intercept <- rep(0, 10000)
+r.odds <- rep(0, 10000)
+age.adv <- rep(0, 10000)
+
+for (i in 1:10000) {
+  boot.samp <- sample(1:nrow(train), nrow(train), replace=TRUE)
+  data <- train[boot.samp,]
+  model <- glm(red_win ~ R_odds + age_adv, data=data, family='binomial')
+  coefs <- summary(model)$coef
+  intercept[i] <- coefs[1,1]
+  r.odds[i] <- coefs[2,1]
+  age.adv[i] <- coefs[3,1]
+}
+
+
+# Calculate standard errors
+se.int <- sd(intercept)
+se.odds <- sd(r.odds)
+se.age <- sd(age.adv)
+se <- c(se.int, se.odds, se.age)
+
+# Build 95% confidence interval using bootstrapped SE's
+low.boot <- summ$coef[,1] - 1.96*se
+high.boot <- summ$coef[,1] + 1.96*se
+
+CI.boot <- data.frame(low.boot, high.boot)
+colnames(CI.boot) <- c('Low', 'High')
+CI.boot$Size <- CI.boot$High - CI.boot$Low
+CI.boot
+```
+
+### Bootstrapped Distribution of Coefficients from Training Data   
+  
+```{r, figures-side, fig.show='hold', out.width='30%', echo=FALSE}
+# Plot distribution of all bootstrapped estimates
+#par(mfrow=c(1, 3))
+hist(intercept, main='')
+hist(r.odds, main='')
+hist(age.adv, main='')
+# All distributions look very close to normal distribution
+```
+
+
+In an effort to be more conservative in our p-value estimates, we performed both the Benjamini-Hochberg and Bonerroni processes on the p-values produced by glm(). Neither of the two processes increased the p-values of our significant coefficients enough that they became insignificant. Both R_odds and age_adv remain statistically significant at the 0.01% level.  
+  
+#### P-Values from Training Data
+```{r, echo=FALSE}
+# Extract p-values for all coefficients
+p.vals <- summary(train.model)$coef[,4]
+#p.vals
+
+# Use Benji-Hoch to adjust p-values to account for multiple hypothesis testing
+benji.hoch <- p.adjust(p.vals, method='BH', n=3)
+#benji.hoch
+
+# Now try the ol' boneroni
+boneroni <- p.adjust(p.vals, method='bonferroni', n=3)
+#boneroni
+
+# Compare the results from all three methods
+p.val.table <- data.frame(p.vals, benji.hoch, boneroni)
+colnames(p.val.table) <- c('GLM Output', 'BH', 'Bonferroni')
+t(p.val.table)
+
+```
+
+#### P-Values from Test Data  
+```{r, echo=FALSE}
+# Extract p-values for all coefficients
+p.vals <- summary(test.model)$coef[,4]
+#p.vals
+
+# Use Benji-Hoch to adjust p-values to account for multiple hypothesis testing
+benji.hoch <- p.adjust(p.vals, method='BH', n=3)
+#benji.hoch
+
+# Now try the ol' boneroni
+boneroni <- p.adjust(p.vals, method='bonferroni', n=3)
+#boneroni
+
+# Compare the results from all three methods
+p.vals.test <- data.frame(p.vals, benji.hoch, boneroni)
+colnames(p.vals.test) <- c('GLM Output', 'BH', 'Bonferroni')
+t(p.vals.test)
+
+```
+
+We separately fit a model on the training data using *all* the non-transformed covariates (i.e., not just the ones that lasso selected). When doing this we found that both R_odds and age_adv remained significant at the same level, but we also saw that several other variables (TD_landed_adv, reach_adv, and win_streak_dif) also came up as statistically significant at the 5% level. This tells me that perhaps these values are likely to be non-zero (statistically significant), but not practically significant (i.e., they didn’t reduce prediction error significantly, so the lasso zeroed them out). However, after running BH and Bonferroni on these p-values, the only ones that remained significant are R_odds, age_adv, and TD_landed_adv, which is very close to the subset of variables selected by lasso (R_odds and age_adv).  
+  
+#### P-Values on Coefficients in Model Using All Covariates
+```{r, echo=FALSE}
+full.mod <- glm(red_win ~ ., data=train, family='binomial')
+summ.full <- summary(full.mod)
+
+# Extract p-values
+p.vals.full <- summ.full$coef[,4]
+
+sig.p.vals <- p.vals.full[p.vals.full<0.05]
+
+# Use Benji-Hoch to adjust p-values to account for multiple hypothesis testing
+benji.hoch.full <- p.adjust(sig.p.vals, method='BH', n=length(p.vals.full))
+
+# Now try the ol' boneroni
+boneroni.full <- p.adjust(sig.p.vals, method='bonferroni', n=length(p.vals.full))
+
+# Compare the results from all three methods
+p.val.table.full <- data.frame(sig.p.vals, benji.hoch.full, boneroni.full)
+colnames(p.val.table.full) <- c('GLM Output', 'BH', 'Bonferroni')
+t(p.val.table.full)
+
+```
+
+
+We also investigated fixing the issue of post-selection inference mentioned above. We do this by splitting our entire data into two equal parts (a 50-50 ratio) and running lasso to select covariates on the first split. Then, after fixing the model to our selected covariates, we fit a generic logistic regression on the unseen second split of data to determine significance. In this case, the lasso model selects the R_odds coefficient only, and when performing inference on the unseen data, the R_odds coefficient is identified as statistically significant, with its p-value at the level of 1e-36. Thus, we confirm through this method that the R_odds coefficient is statistically significant even in a more relatively unbiased setting that mitigates the issue of post-selection inference. Additionally, this means that coefficients such as age_adv that showed statistical significance in earlier settings may have been prone to biases from post-selection inference; however, because the training data (80% of dataset) is a larger dataset than the 50% split that we use currently, it is possible that the training set represented true relationships more accurately between the variables in the population.
+
+#### Coefficients and Confidence Intervals when Correcting Post-Selection Inference
+```{r, echo=FALSE}
+# Split 50/50 to correct post-selection inference
+set.seed(138)
+infer.split <- sample(nrow(fights), nrow(fights)/2)
+
+infer1 <- fights[infer.split,keep]
+infer2 <- fights[-infer.split,keep]
+
+# Create model matrix with no two way interactions for now
+form.infer <- red_win ~ . + .^2
+x.infer <- model.matrix(form.infer, data=infer1)
+
+y.infer <- infer1$red_win
+
+lasso.infer <- cv.glmnet(x.infer, y.infer, type.measure='auc', alpha=1, 
+                      family='binomial', standardize=TRUE, seed=1)
+#plot(lasso.infer$lambda, lasso.infer$cvm, xlab='Lambda', ylab='AUC', main='Lasso')
+lasso.infer.lambda <- lasso.infer$lambda.min
+lasso.infer.auc <- max(lasso.infer$cvm)
+
+# Coefficients for both models
+#coef(lasso.infer, s='lambda.min')
+
+infer2.model <- glm(red_win ~ R_odds, data=infer2, family='binomial')
+#summary(infer2.model)
+
+# Construct 95% normal confidence intervals
+infer.low.norm <- rep(0, 3)
+infer.high.norm <- rep(0, 3)
+infer.summ <- summary(infer2.model)
+infer.summ$coef
+infer.low.norm <- infer.summ$coef[,1] - 1.96*infer.summ$coef[,2]
+infer.high.norm <- infer.summ$coef[,1] + 1.96*infer.summ$coef[,2]
+infer.CI.norm <- data.frame(infer.low.norm, infer.high.norm)
+colnames(infer.CI.norm) <- c('Low', 'High')
+infer.CI.norm$Size <- infer.CI.norm$High - infer.CI.norm$Low
+infer.CI.norm
+```
+
+## Part Three: Discussion  
+  
+  The main real-life application of our models would certainly be in the context of gambling. Bettors are always looking for new and improved ways to beat the odds, and this could certainly be useful for that. For example, if the Vegas gambling odds favor a particular fighter but our model strongly suggests a different outcome, this could produce a lucrative opportunity for bettors to get one over on Vegas. The prediction of fighter odds could similarly be used to discover when Vegas odds are over or under what they should be, also resulting in potentially lucrative opportunities for bettors.
+
+  One other potential application, however, could be for fighters, managers, and promoters. For example, fighters and managers could use these models to pick which fights they want to take. Nobody wants to take a match that they have a projected 90% chance of losing. Similarly, promoters generally like to pit fighters against other fighters of equal skill, as it results in a more interesting and entertaining match for the fans. These models could be used to find potential fights with close to 50/50 odds which might be better fights and hence earn more money via ticket sales and pay-per-views.
+
+  Although our models were trained on several thousand observations, it would almost certainly be a good idea to update them regularly for two reasons. The first is that our predictive models, although respectable, still leave a lot of room for error—more future data will likely help remove some of that error. The second reason is that the sport of MMA is still relatively young and constantly evolving, meaning the attributes that favor a fighter today may be completely different than the ones that favor a fighter in five or ten years.
+
+Anyone who uses our models should be aware of our method of transforming the data where the statistics of the two fighters in each match were collapsed into single statistics, each capturing the differences between the fighters. While these single combined statistics did a good job of explaining which player had the advantage, the degree to which these differences can explain the outcome must be taken with caution. For example, the same 4-year difference can have a different scale of effects depending on the fighters' ages; the difference between a 23-year-old and a 27-year-old is likely to mean less than the difference between a 31-year-old and a 35-year-old, as athletes start a sharper performance decline in their early thirties. With regards to overfitting, our best models do well in mitigating the problem. When our best models for both the classification and regression problems were chosen as the lasso model, both cases were able to eliminate unnecessary coefficients, and the test set prediction results had similar magnitudes of accuracy and error to those of cross validation. On the flipside, if a user wishes to utilize our other (non-lasso) models, they could potentially experience problems of overfitting, as these sub-optimal models seem to generalize less well in terms of having higher cross-validation errors in relation to training errors. Furthermore, it would be helpful to a user of this model to understand the effect of post-selection inference on our models; through our analyses, we determine that R_odds is the sole covariate that can be consistently statistically significant after applying corrections to post-selection inference. Thus, we are confident that R_odds has the most explaining power out of all potential covariates in whatever model the user chooses to run. Lastly, the user does not need to worry about the problem of multiple hypothesis testing, as we are only dealing with 1 or 2 hypothesis tests at the same time.
+
+There is not much we would change about the data collection process; the dataset already kept track of a whopping 127 columns, so all the covariates we would have liked to have were present. The only real drawback with the data was the amount of missing values we were forced to delete, but otherwise it would be difficult to get a more detailed and robust dataset than what we already have.
+
+In terms of attacking the same dataset again, we could choose to improve upon our methods of transforms. As mentioned before, our combining of the two fighters' statistics into differences between them may not provide the entire story. One idea to try would be to add statistics of the Red fighter in addition to the differences between the two fighters. This could potentially help in capturing the differing scale of effects in age in the examples of 23- vs 27-year-olds and 31- vs 35-year-olds mentioned earlier. Furthermore, while we tried applying cubic transforms and two-way interaction terms, we could explore further possibilities such as using logarithmic transforms that could help explain non-linear patterns.
+
+
+## Appendix
+
+```{r, echo=FALSE}
+# Construct 95% normal confidence intervals on test data
+
+summ.test <- summary(test.model)
+low.norm.test <- summ.test$coef[,1] - 1.96*summ.test$coef[,2]
+high.norm.test <- summ.test$coef[,1] + 1.96*summ.test$coef[,2]
+CI.norm.test <- data.frame(low.norm.test, high.norm.test)
+colnames(CI.norm.test) <- c('Low', 'High')
+
+CI.norm.test$Size <- CI.norm.test$High - CI.norm.test$Low
+
+
+
+# Bootstrap for confidence intervals
+intercept.test <- rep(0, 10000)
+r.odds.test <- rep(0, 10000)
+age.adv.test <- rep(0, 10000)
+
+for (i in 1:10000) {
+  boot.samp <- sample(1:nrow(test), nrow(test), replace=TRUE)
+  data <- test[boot.samp,]
+  model <- glm(red_win ~ R_odds + age_adv, data=data, family='binomial')
+  coefs <- summary(model)$coef
+  intercept.test[i] <- coefs[1,1]
+  r.odds.test[i] <- coefs[2,1]
+  age.adv.test[i] <- coefs[3,1]
+}
+```
+
+### Bootstrapped Distributions of Coefficients on Test Data  
+  
+```{r, fig.show='hold', out.width='30%', echo=FALSE}
+# Plot distribution of all bootstrapped estimates
+#par(mfrow=c(1,3))
+hist(intercept.test, main='')
+hist(r.odds.test, main='')
+hist(age.adv.test, main='')
+# All distributions look very close to normal distribution
+
+# Calculate standard errors
+se.int.test <- sd(intercept.test)
+se.odds.test <- sd(r.odds.test)
+se.age.test <- sd(age.adv.test)
+se.test <- c(se.int.test, se.odds.test, se.age.test)
+
+# Build 95% confidence interval using bootstrapped SE's
+low.boot.test <- summ.test$coef[,1] - 1.96*se.test
+high.boot.test <- summ.test$coef[,1] + 1.96*se.test
+
+CI.boot.test <- data.frame(low.boot.test, high.boot.test)
+colnames(CI.boot.test) <- c('Low', 'High')
+CI.boot.test$Size <- CI.boot.test$High - CI.boot.test$Low
+```
+
+#### glm() Confidence Intervals on Test Data
+```{r, echo=FALSE}
+CI.norm.test
+```
+
+### Bootstrapped Confidence Intervals on Test Data
+```{r, echo=FALSE}
+CI.boot.test
+
+```
+
+### Residual Plots for Regression
+```{r, fig.show='hold', out.width='30%', echo=FALSE}
+# take away red_win column because it would give what we're predicting for away
+train_odds <- select(train, -(red_win))
+test_odds <- select(test, -(red_win))
+
+# divide train data into X and Y
+# will be useful for Ridge and Lasso especially
+X.train_odds <- select(train_odds, -(R_odds))
+Y.train_odds <- train_odds$R_odds
+# cubic transform on all numeric variables
+cubed_X.train_odds <-
+  select(X.train_odds,
+         -c(title_bout, weight_class, R_better_rank, B_better_rank,
+            R_switch, B_switch))^3
+# rename cubed column names to avoid confusion
+new_col_names <- rep(NA, ncol(cubed_X.train_odds))
+for (i in 1:length(new_col_names)) {
+  new_col_names[i] <- paste(colnames(cubed_X.train_odds)[i], '^3', sep='')
+}
+colnames(cubed_X.train_odds) <- new_col_names
+
+# Create model matrix with all two way interactions
+form_inter <- R_odds ~ . + .^2
+X.train_odds_matrix_inter <- model.matrix(form_inter, data=train_odds)
+# column-bind cubic terms to the interaction terms
+data_w_cubes_inter <- cbind(X.train_odds_matrix_inter, cubed_X.train_odds, Y.train_odds)
+# ultimate model matrix with interactions and transforms
+X.train_odds_matrix_inter <- model.matrix(Y.train_odds ~ ., data=data_w_cubes_inter)
+
+# 10 fold cross validation for Lasso with all interactions and transforms
+fm.lasso_inter <- cv.glmnet(X.train_odds_matrix_inter,
+                            Y.train_odds, type.measure='mse',
+                            alpha = 1, seed=1, standardize=TRUE)
+# Value of lambda that gives minimum MSE
+# fm.lasso_inter$lambda.min
+
+
+# residual plots
+fm.lasso_inter.pred <- predict(fm.lasso_inter, s=fm.lasso_inter$lambda.min, 
+                               newx=X.train_odds_matrix_inter)
+lasso.fm.residuals <- train_odds$R_odds - fm.lasso_inter.pred
+plot(fm.lasso_inter.pred, lasso.fm.residuals)
+abline(h=0, col=2)
+#cor(fm.lasso_inter.pred, lasso.fm.residuals) 
+plot(train_odds$age_adv, lasso.fm.residuals)
+abline(h=0, col=2)
+plot(train_odds$height_adv, lasso.fm.residuals)
+abline(h=0, col=2)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
